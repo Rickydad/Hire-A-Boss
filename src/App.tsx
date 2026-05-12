@@ -18,13 +18,6 @@ const getUserId = () => {
 
 const USER_ID = getUserId();
 
-// 🔥 API 配置（替换成你的真实信息）
-//const API_CONFIG = {
-//  url: 'https://api.deepseek.com/chat/completions',
-//  apiKey: 'sk-f6fe7c90b0e24ea283baa742d46db4dc', // ← 替换成你的 API Key
-//  model: 'deepseek-chat',
-//  
-//};
 
 interface Message {
   id: string;
