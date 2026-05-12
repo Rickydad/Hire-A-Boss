@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la supabase/)",
+      "Bash(ls -la supabase/functions/)",
+      "Bash(python -c ' *)",
+      "Bash(python *)",
+      "Bash(conda info *)"
+    ]
+  }
+}

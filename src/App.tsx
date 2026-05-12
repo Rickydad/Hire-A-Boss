@@ -1,5 +1,30 @@
-import { useState, useEffect, useRef, useEffect as useLayoutEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Send, Briefcase } from 'lucide-react';
+
+
+import { createClient } from '@supabase/supabase-js';
+
+// 🔥 Supabase 配置（替换成你的）
+const supabase = createClient(
+  'https://wgymswtcffgjrgpbysmd.supabase.co',  // ← 替换 Project URL
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndneW1zd3RjZmZnanJncGJ5c21kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3OTA2MzksImV4cCI6MjA5MDM2NjYzOX0.IqxuBFr-zJJTVo4Wu1sh1PoKqAkag6gvv-LmZH4uMGQ'  // ← 替换 anon public key
+);
+
+// 生成用户 ID
+const getUserId = () => {
+  // 🔧 临时固定，用于测试多设备同步
+  return 'user-123';
+};
+
+const USER_ID = getUserId();
+
+// 🔥 API 配置（替换成你的真实信息）
+//const API_CONFIG = {
+//  url: 'https://api.deepseek.com/chat/completions',
+//  apiKey: 'sk-f6fe7c90b0e24ea283baa742d46db4dc', // ← 替换成你的 API Key
+//  model: 'deepseek-chat',
+//  
+//};
 
 interface Message {
   id: string;
@@ -13,6 +38,7 @@ interface Boss {
   title: string;
   avatar: string;
   tasks: string[];
+  systemPrompt: string; // 新增：老板人设
 }
 
 const BOSSES: Record<string, Boss> = {
@@ -20,16 +46,19 @@ const BOSSES: Record<string, Boss> = {
     name: '张总',
     title: 'CEO',
     avatar: '👔',
-    tasks: ['完成季度报告', '准备融资方案', '优化团队结构']
+    tasks: ['完成季度报告', '准备融资方案', '优化团队结构'],
+    systemPrompt: '你是一个温和的 CEO，善于鼓励员工，关注长期发展和员工成长'
   },
   wang: {
     name: '王总',
     title: 'COO',
     avatar: '💼',
-    tasks: ['执行成本优化', '提升运营效率', '建立质量体系']
+    tasks: ['执行成本优化', '提升运营效率', '建立质量体系'],
+    systemPrompt: '你是一个严格的 COO，注重效率和结果，说话简洁直接'
   }
 };
 
+// 预设回复（AI 接入前的临时方案）
 const BOSS_REPLIES = [
   '收到，我会安排',
   '很好，继续加油',
@@ -39,67 +68,254 @@ const BOSS_REPLIES = [
 ];
 
 function App() {
-  const [currentBoss, setCurrentBoss] = useState<'zhang' | 'wang'>('zhang');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [currentBoss, setCurrentBoss] = useState<'zhang' | 'wang'>('wang');
+  
+  // 🔧 修改 1：每个老板独立的对话记录
+  const [conversations, setConversations] = useState<Record<string, Message[]>>({
+    zhang: [],
+    wang: []
+  });
+  
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('hireBossChat');
-    if (saved) {
-      setMessages(JSON.parse(saved));
-    } else {
-      setMessages([
-        {
-          id: '1',
-          role: 'boss',
-          text: `你好，我是${BOSSES[currentBoss].name}。今天的工作如何？`,
-          timestamp: Date.now() - 5000
-        }
-      ]);
+  // 获取当前老板的对话
+  const messages = conversations[currentBoss];
+
+  // 🔧 修改 2：加载时恢复所有老板的对话记录
+// 🔁 替换原来的加载逻辑
+useEffect(() => {
+  loadConversationsFromCloud();
+}, []);
+
+const loadConversationsFromCloud = async () => {
+  try {
+    console.log('📥 正在从云端加载数据...', USER_ID);
+    
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', USER_ID);
+    
+    if (error) {
+      console.error('加载失败:', error);
+      throw error;
     }
-  }, []);
+    
+    console.log('📦 云端数据:', data);
+    
+    if (data && data.length > 0) {
+      // 从云端恢复数据
+      const conversations: Record<string, Message[]> = {};
+      data.forEach(row => {
+        conversations[row.boss_key] = row.messages;
+      });
+      setConversations(conversations);
+      console.log('✅ 云端数据加载成功');
+    } else {
+      // 没有云端数据，初始化默认对话
+      console.log('ℹ️ 无云端数据，使用默认对话');
+      const defaultConversations: Record<string, Message[]> = {
+        zhang: [{
+          id: `welcome-zhang-${Date.now()}`,
+          role: 'boss',
+          text: `你好，我是${BOSSES.zhang.name}。今天的工作如何？`,
+          timestamp: Date.now()
+        }],
+        wang: [{
+          id: `welcome-wang-${Date.now()}`,
+          role: 'boss',
+          text: `你好，我是${BOSSES.wang.name}。今天的工作如何？`,
+          timestamp: Date.now()
+        }]
+      };
+      setConversations(defaultConversations);
+    }
+  } catch (error) {
+    console.error('💥 加载云端数据失败:', error);
+    // 失败时尝试从本地恢复
+    const saved = localStorage.getItem('hireBossConversations');
+    if (saved) {
+      setConversations(JSON.parse(saved));
+      console.log('ℹ️ 已从本地恢复数据');
+    }
+  }
+};
 
+
+  // 🔧 修改 3：保存所有老板的对话记录
+// 🔁 替换原来的保存逻辑
+useEffect(() => {
+  saveConversationsToCloud();
+  // 本地也保存一份（离线可用）
+  localStorage.setItem('hireBossConversations', JSON.stringify(conversations));
+}, [conversations]);
+
+const saveConversationsToCloud = async () => {
+  try {
+    console.log('📤 正在保存数据到云端...');
+    
+    for (const [bossKey, messages] of Object.entries(conversations)) {
+      const { data, error } = await supabase
+        .from('conversations')
+        .upsert({
+          user_id: USER_ID,
+          boss_key: bossKey,
+          messages: messages,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,boss_key'
+        });
+      
+      if (error) {
+        console.error(`❌ 保存 ${bossKey} 失败:`, {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+      } else {
+        console.log(`✅ ${bossKey} 保存成功:`, data);
+      }
+    }
+    
+  } catch (error) {
+    console.error('💥 保存云端数据失败:', error);
+  }
+};
+
+  // 保存当前老板选择
   useEffect(() => {
-    localStorage.setItem('hireBossChat', JSON.stringify(messages));
-  }, [messages]);
+    localStorage.setItem('hireBossCurrentBoss', currentBoss);
+  }, [currentBoss]);
 
+  // 自动滚动
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const switchBoss = (boss: 'zhang' | 'wang') => {
-    setCurrentBoss(boss);
-    localStorage.setItem('hireBossCurrentBoss', boss);
-  };
-
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      text: input,
+  // 🔧 修改 4：添加欢迎消息的函数
+  const addWelcomeMessage = (bossKey: string) => {
+    const boss = BOSSES[bossKey];
+    const welcomeMessage: Message = {
+      id: `welcome-${bossKey}-${Date.now()}`,
+      role: 'boss',
+      text: `你好，我是${boss.name}。今天的工作如何？`,
       timestamp: Date.now()
     };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-
-    setTimeout(() => {
-      const bossReply: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'boss',
-        text: BOSS_REPLIES[Math.floor(Math.random() * BOSS_REPLIES.length)],
-        timestamp: Date.now()
-      };
-      setMessages(prev => [...prev, bossReply]);
-      setIsLoading(false);
-    }, 800);
+    
+    setConversations(prev => ({
+      ...prev,
+      [bossKey]: [welcomeMessage]
+    }));
   };
+
+  // 🔧 修改 5：切换老板时，显示对应老板的对话
+  const switchBoss = (boss: 'zhang' | 'wang') => {
+    setCurrentBoss(boss);
+    
+    // 如果新老板没有对话，添加欢迎语
+    if (!conversations[boss] || conversations[boss].length === 0) {
+      setTimeout(() => addWelcomeMessage(boss), 100);
+    }
+  };
+
+  // 🔧 修改 6：发送消息只更新当前老板的对话
+  const sendMessage = async () => {
+  if (!input.trim()) return;
+
+  const userMessage: Message = {
+    id: `user-${Date.now()}`,
+    role: 'user',
+    text: input,
+    timestamp: Date.now()
+  };
+
+  // 添加用户消息到对话
+  setConversations(prev => ({
+    ...prev,
+    [currentBoss]: [...(prev[currentBoss] || []), userMessage]
+  }));
+  
+  setInput('');
+  setIsLoading(true);
+
+  try {
+    const currentConversation = conversations[currentBoss] || [];
+    const boss = BOSSES[currentBoss];
+    
+    // 🔥 新增：限制历史消息数量（最多保留最近20条，约10轮对话）
+    const MAX_HISTORY_MESSAGES = 20;
+
+// 只取最近的消息
+const recentMessages = currentConversation.slice(-MAX_HISTORY_MESSAGES).map(msg => ({
+  role: msg.role === 'user' ? 'user' : 'assistant',
+  content: msg.text
+}));
+
+const messagesForAPI = [
+  { 
+    role: 'system', 
+    content: `你是${boss.name}（${boss.title}）。${boss.systemPrompt}。请用简洁的中文回复，每次回复不超过 50 字。`
+  },
+  ...recentMessages,  // 🔥 改用截断后的历史
+  { role: 'user', content: input }
+];
+
+
+ const response = await fetch(`${supabase.supabaseUrl}/functions/v1/call-ai`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${supabase.supabaseKey}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    messages: messagesForAPI,
+    boss: boss
+  })
+})
+
+    if (!response.ok) {
+      throw new Error(`API 请求失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const aiReply = data.reply;;
+
+    // 添加 AI 回复
+    const bossReply: Message = {
+      id: `boss-${Date.now()}`,
+      role: 'boss',
+      text: aiReply,
+      timestamp: Date.now()
+    };
+    
+    setConversations(prev => ({
+      ...prev,
+      [currentBoss]: [...(prev[currentBoss] || []), bossReply]
+    }));
+    
+  } catch (error) {
+    console.error('AI 调用失败:', error);
+    
+    // 失败时用预设回复
+    const bossReply: Message = {
+      id: `boss-${Date.now()}`,
+      role: 'boss',
+      text: '抱歉，我现在有点忙，稍后回复你。',
+      timestamp: Date.now()
+    };
+    
+    setConversations(prev => ({
+      ...prev,
+      [currentBoss]: [...(prev[currentBoss] || []), bossReply]
+    }));
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const boss = BOSSES[currentBoss];
 
